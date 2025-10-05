@@ -70,10 +70,10 @@ def remove_long_line(bin_img):
 
 def find_contour(bin_img):
     contours, _ = cv2.findContours(
-                                    bin_img, 
-                                    mode=cv2.RETR_EXTERNAL, #외곽선만 검출
-                                    method=cv2.CHAIN_APPROX_SIMPLE  #꼭짓점만 저장
-                                    )
+        bin_img, 
+        mode=cv2.RETR_EXTERNAL, #외곽선만 검출
+        method=cv2.CHAIN_APPROX_SIMPLE  #꼭짓점만 저장
+        )
     return contours
 
 
