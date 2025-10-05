@@ -54,6 +54,20 @@ def morph_close(bin_img, ksize=(3, 3), iterations=1):
     closed = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=iterations)
     return closed
 
+def remove_long_line(bin_img):
+    edges = cv2.Canny(bin_img, 50, 150) # 윤곽선 감지
+    lines = cv2.HoughLinesP(
+        edges,
+        rho=1, theta=np.pi/180, threshold=120, #직선 감지 민감도
+        minLineLength=bin_img.shape[1]//3, #최소 직선 길이 (이미지 가로변의 1/3)
+        maxLineGap=10 #선 사이 최대 간격
+    )
+    cleaned = bin_img.copy()
+    if lines is not None:
+        for x1, y1, x2, y2 in lines[:, 0]:
+            cv2.line(cleaned, (x1,y1),(x2,y2), 0, 3) #선을 검은색으로 덮음
+    return cleaned
+
 def find_contour(bin_img):
     contours, _ = cv2.findContours(
                                     bin_img, 
@@ -61,6 +75,7 @@ def find_contour(bin_img):
                                     method=cv2.CHAIN_APPROX_SIMPLE  #꼭짓점만 저장
                                     )
     return contours
+
 
 
 # 전처리 실행
@@ -87,7 +102,10 @@ for name, img in images:
     # 5. Morph close
     closed = morph_close(th, ksize=(3, 3), iterations=1)
 
-    # 6. Contour
+    # 6. Long Line Remove
+    cleaned = remove_long_line(closed)
+
+    # 7. Contour
     contours = find_contour(closed)
     contour_img = np.zeros_like(closed)
     cv2.drawContours(contour_img, contours, -1, (255, 255, 255), 1)
@@ -98,6 +116,7 @@ for name, img in images:
         "Morph Gradient": grad,
         "Adaptive Threshold": th,
         "Morph close" : closed,
+        "Long Line Remove" : cleaned,
         "Find Contour" : contour_img,
     }
 
@@ -115,7 +134,7 @@ for name, img in images:
                 print(text.strip())
         
         
-        pass_item = ["Gray", "Morph Gradient"]
+        pass_item = ["Gray", "Morph Gradient", "Adaptive Threshold"]
 
         if variant_name in pass_item:
             pass
