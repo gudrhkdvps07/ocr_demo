@@ -54,6 +54,21 @@ def morph_close(bin_img, ksize=(3, 3), iterations=1):
     closed = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=iterations)
     return closed
 
+def quick_diagnose(gray, bin_img):
+    import numpy as np, cv2
+    contrast = float(gray.std())
+
+    edges = cv2.Canny(bin_img, 50, 150)
+    h, w = bin_img.shape[:2]
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120,
+                            minLineLength=w//3, maxLineGap=10)
+    line_count = 0 if lines is None else len(lines)
+
+    fg_ratio = cv2.countNonZero(bin_img) / float(h*w)
+    print(f"[diag] contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
+    return contrast, line_count, fg_ratio
+
+
 def remove_long_line(bin_img):
     edges = cv2.Canny(bin_img, 50, 150) # 윤곽선 감지
     lines = cv2.HoughLinesP(
@@ -93,6 +108,8 @@ for name, img in images:
     # 2. Gray
     gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
 
+    grayImg_check = quick_diagnose(gray, gray) #원본 밝기, 대비 확인
+
     # 3. Morph Gradient
     grad = morph_gradient(gray)
 
@@ -101,6 +118,8 @@ for name, img in images:
 
     # 5. Morph close
     closed = morph_close(th, ksize=(3, 3), iterations=1)
+
+    preprocess_check = quick_diagnose(gray, closed) #전처리 후 다시 평가
 
     # 6. Long Line Remove
     cleaned = remove_long_line(closed)
@@ -134,7 +153,7 @@ for name, img in images:
                 print(text.strip())
         
         
-        pass_item = ["Gray", "Morph Gradient", "Adaptive Threshold"]
+        pass_item = ["Gray", "GImg Check", "Morph Gradient", "Preprocess Check", "Adaptive Threshold"]
 
         if variant_name in pass_item:
             pass
