@@ -17,11 +17,9 @@ images = [
     ("Image 3", cv2.imread(path_img3)),
 ]
 
-
 # OCR 옵션
 psm_options = [6]  
 oem_options = [3]   
-
 
 #함수 LIST
 def resize_img(img, name, max_len=1000):
@@ -39,29 +37,39 @@ def morph_gradient(gray, ksize=(3,3)):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, ksize)
     return cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
 
-
 def otsu_threshold(gray, invert=True):  #adaptive에서 otsu로 변경
     _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     if invert:
         th = cv2.bitwise_not(th)
     return th
 
+def clahe_contrast(gray):
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(4,4))
+    return clahe.apply(gray)
+
 def morph_close(bin_img, ksize=(3, 3), iterations=1):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, ksize)
     closed = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=iterations)
     return closed
 
+#진단 함수
 def quick_diagnose(gray, bin_img):
     contrast = float(gray.std())
     edges = cv2.Canny(bin_img, 50, 150)
     h, w = bin_img.shape[:2]
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120,
-                            minLineLength=w//3, maxLineGap=10)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120, minLineLength=w//3, maxLineGap=10)
     line_count = 0 if lines is None else len(lines)
     fg_ratio = cv2.countNonZero(bin_img) / float(h*w)
     print(f"[diag] contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
     return contrast, line_count, fg_ratio
 
+def morph_topHat(gray):
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
+    return cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
+
+def morph_blackHat(gray):
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
+    return cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
 
 def remove_long_line(bin_img):
     edges = cv2.Canny(bin_img, 50, 150) # 윤곽선 감지
@@ -94,6 +102,7 @@ def choose_preprocess(img, name):
 
     if contrast < 15:
         print("저대비: morph gradient, Otsu")
+        gray = morph_topHat(gray)
         grad = morph_gradient(gray)
         th = otsu_threshold(grad)
         closed = morph_close(th)
@@ -101,6 +110,8 @@ def choose_preprocess(img, name):
 
     elif contrast > 35:
         print("고대비")
+        if contrast > 45:
+            gray = morph_blackHat(gray)
         th = otsu_threshold(gray)
         result = morph_close(th)
 
@@ -138,7 +149,7 @@ for name, img in images:
             print(f" OEM {oem} | PSM {psm} 결과:")
             print(text.strip())
 
-    cv2.imshow(f"{name}", processed)
+    cv2.imshow(f"{name} - Preprocessed", processed)
     print("\n")
 
 
