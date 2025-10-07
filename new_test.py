@@ -39,8 +39,23 @@ def morph_gradient(gray, ksize=(3,3)):
 
 def otsu_threshold(gray, invert=True):  #adaptive에서 otsu로 변경
     _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    if invert:
+
+    # 흰색 비율 계산
+    white_ratio = cv2.countNonZero(th) / float(th.size)
+
+    # 흰 영역이 적을 경우 반전
+    if white_ratio < 0.5:
         th = cv2.bitwise_not(th)
+
+        # 반전 후 대비 손실 방지 -> gamma correction
+        invGamma = 1.0 / 0.7   # 감마 보정 계수
+        table = np.array([(i / 255.0) ** invGamma * 255 for i in np.arange(256)]).astype("uint8")
+        th = cv2.LUT(th, table)
+
+        # 경계 선명화
+        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]], dtype=np.float32)
+        th = cv2.filter2D(th, -1, kernel)
+
     return th
 
 def clahe_contrast(gray):
@@ -96,7 +111,8 @@ def find_contour(bin_img):
 #자동 전처리 로직
 def choose_preprocess(img, name):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    contrast, line_count, fg_ratio = quick_diagnose(gray, gray)
+    _, bin_tmp = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    contrast, line_count, fg_ratio = quick_diagnose(gray, bin_tmp)
 
     print(f"{name} 진단 결과: contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
 
