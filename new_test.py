@@ -40,11 +40,8 @@ def morph_gradient(gray, ksize=(3,3)):
     return cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
 
 
-def adaptive_threshold(gray, block_size=25, C=10, invert=True):
-    th = cv2.adaptiveThreshold(
-        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-        cv2.THRESH_BINARY, block_size, C
-    )
+def otsu_threshold(gray, invert=True):  #adaptive에서 otsu로 변경
+    _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     if invert:
         th = cv2.bitwise_not(th)
     return th
@@ -55,15 +52,12 @@ def morph_close(bin_img, ksize=(3, 3), iterations=1):
     return closed
 
 def quick_diagnose(gray, bin_img):
-    import numpy as np, cv2
     contrast = float(gray.std())
-
     edges = cv2.Canny(bin_img, 50, 150)
     h, w = bin_img.shape[:2]
     lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120,
                             minLineLength=w//3, maxLineGap=10)
     line_count = 0 if lines is None else len(lines)
-
     fg_ratio = cv2.countNonZero(bin_img) / float(h*w)
     print(f"[diag] contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
     return contrast, line_count, fg_ratio
@@ -91,9 +85,39 @@ def find_contour(bin_img):
         )
     return contours
 
+#자동 전처리 로직
+def choose_preprocess(img, name):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    contrast, line_count, fg_ratio = quick_diagnose(gray, gray)
+
+    print(f"{name} 진단 결과: contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
+
+    if contrast < 15:
+        print("저대비: morph gradient, Otsu")
+        grad = morph_gradient(gray)
+        th = otsu_threshold(grad)
+        closed = morph_close(th)
+        result = closed
+
+    elif contrast > 35:
+        print("고대비")
+        th = otsu_threshold(gray)
+        result = morph_close(th)
+
+    else:
+        print("중간 대비")
+        grad = morph_gradient(gray)
+        th = otsu_threshold(grad)
+        result = morph_close(th)
+    
+    if line_count >= 3:
+        print("표 또는 긴 선 감지")
+        result = remove_long_line(result)
+
+    return result  
 
 
-# 전처리 실행
+# OCR & 출력
 for name, img in images:
     if img is None:
         print(f"{name} 이미지를 불러올 수 없음.")
@@ -102,65 +126,21 @@ for name, img in images:
     print("=" * 70)
     print(f" {name} 결과")
 
-    # 1. Resize
     img_resized = resize_img(img, name)
+    processed = choose_preprocess(img_resized, name)
 
-    # 2. Gray
-    gray = cv2.cvtColor(img_resized, cv2.COLOR_BGR2GRAY)
+    print("-" * 60)
+    print(f"[OCR 결과: {name}]")
+    for psm in psm_options:
+        for oem in oem_options:
+            config = f'--oem {oem} --psm {psm} -c user_defined_dpi=300'
+            text = pytesseract.image_to_string(processed, lang="kor+eng", config=config)
+            print(f" OEM {oem} | PSM {psm} 결과:")
+            print(text.strip())
 
-    grayImg_check = quick_diagnose(gray, gray) #원본 밝기, 대비 확인
-
-    # 3. Morph Gradient
-    grad = morph_gradient(gray)
-
-    # 4. Adaptive Threshold
-    th = adaptive_threshold(grad, block_size=35, C=5)
-
-    # 5. Morph close
-    closed = morph_close(th, ksize=(3, 3), iterations=1)
-
-    preprocess_check = quick_diagnose(gray, closed) #전처리 후 다시 평가
-
-    # 6. Long Line Remove
-    cleaned = remove_long_line(closed)
-
-    # 7. Contour
-    contours = find_contour(closed)
-    contour_img = np.zeros_like(closed)
-    cv2.drawContours(contour_img, contours, -1, (255, 255, 255), 1)
-
-    # 전처리 관리
-    variants = {
-        "Gray": gray,
-        "Morph Gradient": grad,
-        "Adaptive Threshold": th,
-        "Morph close" : closed,
-        "Long Line Remove" : cleaned,
-        "Find Contour" : contour_img,
-    }
-
-
-# OCR & 출력
-    for variant_name, proc_img in variants.items():
-        print("-" * 60)
-        print(f"[전처리: {variant_name}]")
-
-        for psm in psm_options:
-            for oem in oem_options:
-                config = f'--oem {oem} --psm {psm} -c user_defined_dpi=300'
-                text = pytesseract.image_to_string(proc_img, lang="kor+eng", config=config)
-                print(f" OEM {oem} | PSM {psm} 결과:")
-                print(text.strip())
-        
-        
-        pass_item = ["Gray", "GImg Check", "Morph Gradient", "Preprocess Check", "Adaptive Threshold"]
-
-        if variant_name in pass_item:
-            pass
-        else:
-            cv2.imshow(f"{name} - {variant_name}", proc_img)
-
+    cv2.imshow(f"{name}", processed)
     print("\n")
+
 
 cv2.waitKey(0)
 cv2.destroyAllWindows()
