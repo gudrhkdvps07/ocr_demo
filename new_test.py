@@ -10,18 +10,19 @@ pytesseract.pytesseract.tesseract_cmd = tesseract_path
 path_img1 = "./meme.jpg"
 path_img2 = "./resume.png"
 path_img3 = "./test.png"
+path_img4 = "./nameList.png"
 
 images = [
     ("Image 1", cv2.imread(path_img1)),
     ("Image 2", cv2.imread(path_img2)),
     ("Image 3", cv2.imread(path_img3)),
+    ("Image 4", cv2.imread(path_img4)),
 ]
 
 # OCR 옵션
-psm_options = [6]  
 oem_options = [3]   
 
-#함수 LIST
+#사이즈 조절 함수
 def resize_img(img, name, max_len=1000):
     h, w = img.shape[:2]
     print(f" {name} 원본 크기: {w} x {h}")
@@ -33,6 +34,51 @@ def resize_img(img, name, max_len=1000):
         new_w = int(w / h * max_len)
     return cv2.resize(img, (new_w, new_h))
 
+#psm 자동 분기
+def select_psm(contrast, fg_ratio):
+    if contrast < 20 and fg_ratio > 0.6 : #저대비지만 글자가 많으므로 문장
+        return 6
+    
+    elif contrast < 20 : #저대비일때는 단어 중심으로 잡음.
+        return 11
+    
+    elif fg_ratio > 0.6: #글자 영역 많으면 문장형
+        return 6
+    
+    else: 
+        return 6
+
+# contrast, fg_ratio 기반 psm 선택 후 ocr 수행
+def auto_psm_ocr(processed, contrast, fg_ratio):
+    psm = select_psm(contrast, fg_ratio)
+    oem = 3
+    config = f'--oem {oem} --psm {psm} -c user_definded_dpi=300'
+
+    text = pytesseract.image_to_string(processed, lang="kor+eng", config=config)
+    print(f"선택된 psm: {psm}")
+    return text.strip()
+
+#진단함수
+def quick_diagnose(gray, bin_img):
+    contrast = float(gray.std())
+    edges = cv2.Canny(bin_img, 50, 150)
+    h, w = bin_img.shape[:2]
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120, minLineLength=w//3, maxLineGap=10)
+    line_count = 0 if lines is None else len(lines)
+    fg_ratio = cv2.countNonZero(bin_img) / float(h*w)
+    print(f"[diag] contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
+    return contrast, line_count, fg_ratio
+
+def find_contour(bin_img):
+    contours, _ = cv2.findContours(
+        bin_img, 
+        mode=cv2.RETR_EXTERNAL, #외곽선만 검출
+        method=cv2.CHAIN_APPROX_SIMPLE  #꼭짓점만 저장
+        )
+    return contours
+
+
+# ===== 전처리 함수 =====
 def morph_gradient(gray, ksize=(3,3)):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, ksize)
     return cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
@@ -62,21 +108,10 @@ def clahe_contrast(gray):
     clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(4,4))
     return clahe.apply(gray)
 
-def morph_close(bin_img, ksize=(3, 3), iterations=1):
+def morph_close(bin_img, ksize=(2, 2), iterations=1):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, ksize)
     closed = cv2.morphologyEx(bin_img, cv2.MORPH_CLOSE, kernel, iterations=iterations)
     return closed
-
-#진단 함수
-def quick_diagnose(gray, bin_img):
-    contrast = float(gray.std())
-    edges = cv2.Canny(bin_img, 50, 150)
-    h, w = bin_img.shape[:2]
-    lines = cv2.HoughLinesP(edges, 1, np.pi/180, 120, minLineLength=w//3, maxLineGap=10)
-    line_count = 0 if lines is None else len(lines)
-    fg_ratio = cv2.countNonZero(bin_img) / float(h*w)
-    print(f"[diag] contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
-    return contrast, line_count, fg_ratio
 
 def morph_topHat(gray):
     kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3,3))
@@ -100,13 +135,6 @@ def remove_long_line(bin_img):
             cv2.line(cleaned, (x1,y1),(x2,y2), 0, 3) #선을 검은색으로 덮음
     return cleaned
 
-def find_contour(bin_img):
-    contours, _ = cv2.findContours(
-        bin_img, 
-        mode=cv2.RETR_EXTERNAL, #외곽선만 검출
-        method=cv2.CHAIN_APPROX_SIMPLE  #꼭짓점만 저장
-        )
-    return contours
 
 #자동 전처리 로직
 def choose_preprocess(img, name):
@@ -141,7 +169,7 @@ def choose_preprocess(img, name):
         print("표 또는 긴 선 감지")
         result = remove_long_line(result)
 
-    return result  
+    return result, contrast, fg_ratio
 
 
 # OCR & 출력
@@ -154,20 +182,15 @@ for name, img in images:
     print(f" {name} 결과")
 
     img_resized = resize_img(img, name)
-    processed = choose_preprocess(img_resized, name)
+    processed, contrast, fg_ratio = choose_preprocess(img_resized, name)
 
     print("-" * 60)
     print(f"[OCR 결과: {name}]")
-    for psm in psm_options:
-        for oem in oem_options:
-            config = f'--oem {oem} --psm {psm} -c user_defined_dpi=300'
-            text = pytesseract.image_to_string(processed, lang="kor+eng", config=config)
-            print(f" OEM {oem} | PSM {psm} 결과:")
-            print(text.strip())
-
-    cv2.imshow(f"{name} - Preprocessed", processed)
+    text = auto_psm_ocr(processed, contrast, fg_ratio)
+    print(text)
     print("\n")
 
+    cv2.imshow(f"{name} - Preprocessed", processed)
 
 cv2.waitKey(0)
 cv2.destroyAllWindows()
