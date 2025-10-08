@@ -159,9 +159,10 @@ def choose_preprocess(img, name):
 
     elif 15 <= contrast <30 and fg_ratio >= 0.5:
         print("중간대비 글자 많음")
-        gray_eq = cv2.equalizeHist(gray)
-        _, th = cv2.threshold(gray_eq, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        result = morph_close(th, (3,3))
+        grad = morph_gradient(gray)
+        th = otsu_threshold(gray)
+        closed = morph_close(th)
+        result = closed
 
     elif 15 <= contrast < 30 and fg_ratio <= 0.9:
         print("중간대비")
