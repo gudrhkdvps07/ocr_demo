@@ -37,15 +37,19 @@ def resize_img(img, name, max_len=1000):
 #psm 자동 분기
 def select_psm(contrast, fg_ratio):
     if contrast < 20 and fg_ratio > 0.6 : #저대비지만 글자가 많으므로 문장
+        print(" (PSM) <저대비에 문자많음>")
         return 6
     
     elif contrast < 20 : #저대비일때는 단어 중심으로 잡음.
+        print(" (PSM) <대비적음>")
         return 11
     
     elif fg_ratio > 0.6: #글자 영역 많으면 문장형
+        print(" (PSM) <문자많음>")
         return 6
     
     else: 
+        print(" (PSM) <일반문서>")
         return 6
 
 # contrast, fg_ratio 기반 psm 선택 후 ocr 수행
@@ -91,9 +95,10 @@ def otsu_threshold(gray, invert=True):  #adaptive에서 otsu로 변경
 
     # 흰 영역이 적을 경우 반전
     if white_ratio < 0.5:
+        print("반전적용")
         th = cv2.bitwise_not(th)
 
-        # 반전 후 대비 손실 방지 -> gamma correction
+        # 반전 후 대비 손실 방지
         invGamma = 1.0 / 0.7   # 감마 보정 계수
         table = np.array([(i / 255.0) ** invGamma * 255 for i in np.arange(256)]).astype("uint8")
         th = cv2.LUT(th, table)
@@ -145,26 +150,32 @@ def choose_preprocess(img, name):
     print(f"{name} 진단 결과: contrast={contrast:.1f}, line_count={line_count}, fg_ratio={fg_ratio:.3f}")
 
     if contrast < 15:
-        print("저대비: morph gradient, Otsu")
-        gray = morph_topHat(gray)
+        print("저대비")
+        #gray = morph_topHat(gray)
         grad = morph_gradient(gray)
-        th = otsu_threshold(grad)
+        th = otsu_threshold(gray)
         closed = morph_close(th)
         result = closed
 
-    elif contrast > 35:
+    elif 15 <= contrast <30 and fg_ratio >= 0.5:
+        print("중간대비 글자 많음")
+        gray_eq = cv2.equalizeHist(gray)
+        _, th = cv2.threshold(gray_eq, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        result = morph_close(th, (3,3))
+
+    elif 15 <= contrast < 30 and fg_ratio <= 0.9:
+        print("중간대비")
+        grad = morph_gradient(gray)
+        th = otsu_threshold(grad)
+        result = morph_close(th)
+
+    else:
         print("고대비")
         if contrast > 45:
             gray = morph_blackHat(gray)
         th = otsu_threshold(gray)
         result = morph_close(th)
 
-    else:
-        print("중간 대비")
-        grad = morph_gradient(gray)
-        th = otsu_threshold(grad)
-        result = morph_close(th)
-    
     if line_count >= 3:
         print("표 또는 긴 선 감지")
         result = remove_long_line(result)
